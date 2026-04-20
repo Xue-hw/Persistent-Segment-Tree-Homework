@@ -1,11 +1,16 @@
+import sys
+sys.setrecursionlimit(200000)#增加递归深度限制，防止在构建或查询深度较大的线段树时出现 RecursionError
+
 class Node:
     """
     线段树节点类
     """
-    def __init__(self, count=0, left=None, right=None):
-        self.count = count  # 该节点管辖区间内的元素个数
-        self.left = left    # 左子节点指针
-        self.right = right  # 右子节点指针
+    __slots__ = ['count', 'sum', 'left', 'right']  # 限制属性，优化内存
+    def __init__(self, count=0, sum_val=0, left=None, right=None):
+        self.count = count
+        self.sum = sum_val
+        self.left = left
+        self.right = right
 
 class PersistentSegmentTree:
     """
@@ -15,10 +20,13 @@ class PersistentSegmentTree:
     def __init__(self, arr):
         self.arr = arr
         # 1. 离散化：去重并排序，建立原始值与离散化下标的映射
+        #Q：why离散化
+        #A：离散化可以将原始数据映射到一个较小的范围内，减少线段树的高度，提高查询效率
+        #实践中：只要查询涉及值的排序或统计（第 k 小、排名、值域计数、不同元素计数等），就应先做离散化；若只按位置更新/查询（区间和、点改等），則直接按下标建树即可
         self.sorted_unique = sorted(list(set(arr)))
-        self.val_to_idx = {val: idx for idx, val in enumerate(self.sorted_unique)}
-        self.max_idx = len(self.sorted_unique) - 1
-        
+        self.val_to_idx = {val: idx for idx, val in enumerate(self.sorted_unique)}# 离散化映射
+        self.max_idx = len(self.sorted_unique) - 1#索引，要用个数减一
+
         # 记录每个历史版本的根节点，roots[i] 表示插入原数组前 i 个元素后的线段树根节点
         self.roots = [self._build(0, self.max_idx)]
         
@@ -41,6 +49,7 @@ class PersistentSegmentTree:
             idx = self.val_to_idx[val] - 1
             
         if idx < 0:
+            print("输入值小于最小值")
             return 1
             
         smaller_count = self._query_count(self.roots[left_root_idx], self.roots[right_root_idx], 0, self.max_idx, 0, idx)
@@ -79,14 +88,9 @@ class PersistentSegmentTree:
     def _insert(self, prev_node, l, r, val_idx):
         """
         插入新节点，返回新版本的节点
-        :param prev_node: 前一个版本的对应节点
-        :param l: 当前管理的离散化区间左端点
-        :param r: 当前管理的离散化区间右端点
-        :param val_idx: 要插入元素的离散化下标
-        :return: 新创建的节点
         """
-        # 创建新节点，复制上一个版本节点的信息
-        new_node = Node(prev_node.count + 1, prev_node.left, prev_node.right)
+        inserted_val = self.sorted_unique[val_idx]
+        new_node = Node(prev_node.count + 1, prev_node.sum + inserted_val, prev_node.left, prev_node.right)
         
         if l == r:
             # 抵达叶子节点，完成插入
@@ -111,6 +115,11 @@ class PersistentSegmentTree:
         :param k: 第 k 小
         :return: 对应的原数组值
         """
+        # 检查区间总数
+        total_count = self.roots[right_root_idx].count - self.roots[left_root_idx].count
+        if k <= 0 or k > total_count:
+            print(f"查询失败：k={k} 超出区间元素总数 {total_count}")
+            return None
         return self._query_kth(self.roots[left_root_idx], self.roots[right_root_idx], 0, self.max_idx, k)
 
     def _query_kth(self, left_node, right_node, l, r, k):
@@ -153,7 +162,33 @@ class PersistentSegmentTree:
             self._print_tree(node.left, l, mid, depth + 1)
             self._print_tree(node.right, mid + 1, r, depth + 1)
 
+    def print_visual_tree(self, version_idx):
+        """
+        可视化打印指定版本的树结构
+        """
+        root = self.roots[version_idx]
+        print(f"\n[可视化树结构 - 版本 {version_idx}]")
+        print("格式: [值域区间] (计数, 累加和)")
+        self._recursive_print(root, 0, self.max_idx, "", True)
 
+    def _recursive_print(self, node, l, r, indent, is_left):
+        if not node or (node.count == 0 and node.sum == 0):
+            return
+        
+        mid = (l + r) // 2
+        if l != r:
+            self._recursive_print(node.right, mid + 1, r, indent + ("    " if is_left else " |  "), False)
+        
+        prefix = indent + (" └── " if is_left else " ┌── ")
+        if l == r:
+            print(f"{prefix}Leaf [{self.sorted_unique[l]}] (c:{node.count}, s:{node.sum})")
+        else:
+            print(f"{prefix}Node [{self.sorted_unique[l]}~{self.sorted_unique[r]}] (c:{node.count}, s:{node.sum})")
+        
+        if l != r:
+            self._recursive_print(node.left, l, mid, indent + (" |  " if is_left else "    "), True)
+
+# 由于‘不同元素查询’需要基于下标维度并进行动态位置抹除，与基于值域维度的权值线段树存在维度冲突，因此我保留了两个类
 class PersistentTreeDistinct:
     """
     可持久化线段树 - (根据数组下标建树)
@@ -196,7 +231,10 @@ class PersistentTreeDistinct:
         return node
 
     def _update(self, prev_node, l, r, idx, val):
-        new_node = Node(prev_node.count + val, prev_node.left, prev_node.right)
+        if prev_node is None:
+            prev_node = Node(0, 0, None, None)
+            
+        new_node = Node(prev_node.count + val, 0, prev_node.left, prev_node.right)
         if l == r:
             return new_node
         mid = (l + r) // 2
@@ -228,6 +266,32 @@ class PersistentTreeDistinct:
         if q_r > mid:
             res += self._query(node.right, mid + 1, tree_r, q_l, q_r)
         return res
+
+    def print_visual_tree(self, version_idx):
+        """
+        可视化打印指定版本的树结构
+        """
+        root = self.roots[version_idx]
+        print(f"\n[基于位置区间的线段树 - 版本 {version_idx}]")
+        print("格式: [位置区间] (有效不同元素计数)")
+        self._recursive_print(root, 0, self.n - 1, "", True)
+
+    def _recursive_print(self, node, l, r, indent, is_left):
+        if not node or node.count == 0:
+            return
+        
+        mid = (l + r) // 2
+        if l != r:
+            self._recursive_print(node.right, mid + 1, r, indent + ("    " if is_left else " |  "), False)
+        
+        prefix = indent + (" └── " if is_left else " ┌── ")
+        if l == r:
+            print(f"{prefix}Leaf pos[{l}] (c:{node.count})")
+        else:
+            print(f"{prefix}Node pos[{l}~{r}] (c:{node.count})")
+        
+        if l != r:
+            self._recursive_print(node.left, l, mid, indent + (" |  " if is_left else "    "), True)
 
 
 # ====== 测试与输出 ======
@@ -269,3 +333,21 @@ if __name__ == "__main__":
     print(f"\n---> [功能演示] 观察持久化的版本复用:")
     pst.print_version_tree(0)  # 空树
     pst.print_version_tree(1)  # 插入第一个元素 4 后的树
+
+    # 可视化树结构演示
+    print(f"\n---> [功能演示] 可视化树结构:")
+    pst.print_visual_tree(1)  # 插入第一个元素 4 后的树
+    pst.print_visual_tree(2)  # 插入前两个元素 4, 1 后的树
+    pst.print_visual_tree(3)  # 插入前三个元素 4, 1, 3 后的树
+    pst.print_visual_tree(4)  # 插入前四个元素 4, 1, 3, 2 后的树
+
+    # 加分项：可视化打印不同元素的线段树版本
+    print(f"\n---> [功能演示] 可视化不同元素线段树版本:")
+    pst_distinct.print_visual_tree(0)  # 空树
+    pst_distinct.print_visual_tree(1)  # 插入第一个元素 4 后的树
+    pst_distinct.print_visual_tree(2)  # 插入前两个元素 4, 1 后的树
+    pst_distinct.print_visual_tree(3)  # 插入前三个元素 4, 1, 3 后的树
+    pst_distinct.print_visual_tree(4)  # 插入前四个元素 4, 1, 3, 2 后的树
+
+
+# 实际上，离散化后的权值线段树通常不需要初始的 $4n$ 建树（除非有初始权值）。每次插入产生 $\lceil \log_2 N \rceil$ 个新节点。经验值通常开启 32倍或40倍 的 $N$
