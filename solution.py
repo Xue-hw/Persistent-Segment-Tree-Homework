@@ -24,7 +24,7 @@ class PersistentSegmentTree:
         #A：离散化可以将原始数据映射到一个较小的范围内，减少线段树的高度，提高查询效率
         #实践中：只要查询涉及值的排序或统计（第 k 小、排名、值域计数、不同元素计数等），就应先做离散化；若只按位置更新/查询（区间和、点改等），則直接按下标建树即可
         self.sorted_unique = sorted(list(set(arr)))
-        self.val_to_idx = {val: idx for idx, val in enumerate(self.sorted_unique)}# 离散化映射
+        self.val_to_idx = {val: idx for idx, val in enumerate(self.sorted_unique)}# 字典离散化映射
         self.max_idx = len(self.sorted_unique) - 1#索引，要用个数减一
 
         # 记录每个历史版本的根节点，roots[i] 表示插入原数组前 i 个元素后的线段树根节点
@@ -188,6 +188,62 @@ class PersistentSegmentTree:
         if l != r:
             self._recursive_print(node.left, l, mid, indent + (" |  " if is_left else "    "), True)
 
+    def export_html_tree(self, version_idx, filename="tree.html"):
+        """
+        利用 Mermaid.js 导出树结构为 HTML，可直接在浏览器中查看可视化图表
+        """
+        root = self.roots[version_idx]
+        lines = ["graph TD"]
+        visited = set()
+        
+        def traverse(node, l, r):
+            if not node:
+                return None
+            node_id = f"node_{id(node)}"
+            if node_id in visited:
+                return node_id
+            visited.add(node_id)
+            
+            if l == r:
+                label = f"Leaf [{self.sorted_unique[l]}]<br>c:{node.count}, s:{node.sum}"
+            else:
+                label = f"Node [{self.sorted_unique[l]}~{self.sorted_unique[r]}]<br>c:{node.count}, s:{node.sum}"
+            
+            lines.append(f'{node_id}("{label}")')
+            
+            if l != r:
+                mid = (l + r) // 2
+                left_id = traverse(node.left, l, mid)
+                if left_id:
+                    lines.append(f"{node_id} -->|L| {left_id}")
+                right_id = traverse(node.right, mid + 1, r)
+                if right_id:
+                    lines.append(f"{node_id} -->|R| {right_id}")
+            return node_id
+
+        traverse(root, 0, self.max_idx)
+        mermaid_str = "\n            ".join(lines)
+        
+        html_content = f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Persistent Segment Tree - Version {version_idx}</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <h2>权值线段树 (主席树) - 版本 {version_idx}</h2>
+    <div class="mermaid">
+            {mermaid_str}
+    </div>
+    <script>
+        mermaid.initialize({{ startOnLoad: true }});
+    </script>
+</body>
+</html>'''
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(html_content)
+
 # 由于‘不同元素查询’需要基于下标维度并进行动态位置抹除，与基于值域维度的权值线段树存在维度冲突，因此我保留了两个类
 class PersistentTreeDistinct:
     """
@@ -293,61 +349,116 @@ class PersistentTreeDistinct:
         if l != r:
             self._recursive_print(node.left, l, mid, indent + (" |  " if is_left else "    "), True)
 
+    def export_html_tree(self, version_idx, filename="tree_distinct.html"):
+        """
+        利用 Mermaid.js 导出区间去重树结构为 HTML，可直接在浏览器中查看可视化图表
+        """
+        root = self.roots[version_idx]
+        lines = ["graph TD"]
+        visited = set()
+        
+        def traverse(node, l, r):
+            if not node or node.count == 0:
+                return None
+            node_id = f"node_{id(node)}"
+            if node_id in visited:
+                return node_id
+            visited.add(node_id)
+            
+            if l == r:
+                label = f"Leaf pos[{l}]<br>c:{node.count}"
+            else:
+                label = f"Node pos[{l}~{r}]<br>c:{node.count}"
+            
+            lines.append(f'{node_id}("{label}")')
+            
+            if l != r:
+                mid = (l + r) // 2
+                left_id = traverse(node.left, l, mid)
+                if left_id:
+                    lines.append(f"{node_id} -->|L| {left_id}")
+                right_id = traverse(node.right, mid + 1, r)
+                if right_id:
+                    lines.append(f"{node_id} -->|R| {right_id}")
+            return node_id
 
-# ====== 测试与输出 ======
-if __name__ == "__main__":
-    # 示例数组
-    arr = [4, 1, 3, 2, 5, 2]
-    print(f"=====================================")
-    print(f"原始数组: {arr}")
-    
-    # 【功能1 & 2】离散化与初始化可持久化线段树
-    pst = PersistentSegmentTree(arr)
-    print(f"离散化结果: {pst.sorted_unique}")
-    
-    # 【功能3-1】区间第k小查询
-    l, r, k = 1, 4, 2  # 下标1到4(包含4)，即数组元素 arr[1:5]
-    res = pst.query_kth(l, r+1, k)
-    expected_arr = sorted(arr[l:r+1])
-    print(f"\n---> [功能演示] 区间第 K 小:")
-    print(f"查询原数组区间 [{l}, {r}]（即 {arr[l:r+1]}）的第 {k} 小值")
-    print(f"期望按升序排列为: {expected_arr} -> 答案应该是 {expected_arr[k-1]}")
-    print(f"主席树查询结果: {res}")
-    
-    # 【扩展功能】查询区间内某元素的排名
-    val_to_rank = 3
-    rank = pst.query_rank(l, r+1, val_to_rank)
-    print(f"\n---> [功能演示] 区间内元素排名:")
-    print(f"元素 {val_to_rank} 在区间 [{l}, {r}] 中的排名是: {rank}")
-    
-    # 【加分项：功能3-2】区间不同元素个数查询
-    pst_distinct = PersistentTreeDistinct(arr)
-    dl, dr = 1, 5  # 查询区间 arr[1:6] => [1, 3, 2, 5, 2]
-    distinct_count = pst_distinct.query_distinct(dl, dr)
-    print(f"\n---> [功能演示] 区间不同元素个数查询 (加分项):")
-    print(f"数组切片 arr[{dl}:{dr}] 的真实值为: {arr[dl:dr+1]}")
-    print(f"该区间内不同的元素集合为: {set(arr[dl:dr+1])} (期待个数: {len(set(arr[dl:dr+1]))})")
-    print(f"加分主席树计算的不同元素个数为: {distinct_count}")
+        traverse(root, 0, self.n - 1)
+        mermaid_str = "\n            ".join(lines)
+        
+        html_content = f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Persistent Tree Distinct - Version {version_idx}</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <h2>区间去重线段树 - 版本 {version_idx}</h2>
+    <div class="mermaid">
+            {mermaid_str}
+    </div>
+    <script>
+        mermaid.initialize({{ startOnLoad: true }});
+    </script>
+</body>
+</html>'''
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(html_content)
 
-    # 【功能4】打印版本树结构展示持久化机制
-    print(f"\n---> [功能演示] 观察持久化的版本复用:")
-    pst.print_version_tree(0)  # 空树
-    pst.print_version_tree(1)  # 插入第一个元素 4 后的树
+# # ====== 测试与输出 ======
+# if __name__ == "__main__":
+#     # 示例数组
+#     arr = [4, 1, 3, 2, 5, 2]
+#     print(f"=====================================")
+#     print(f"原始数组: {arr}")
+    
+#     # 【功能1 & 2】离散化与初始化可持久化线段树
+#     pst = PersistentSegmentTree(arr)
+#     print(f"离散化结果: {pst.sorted_unique}")
+    
+#     # 【功能3-1】区间第k小查询
+#     l, r, k = 1, 4, 2  # 下标1到4(包含4)，即数组元素 arr[1:5]
+#     res = pst.query_kth(l, r+1, k)
+#     expected_arr = sorted(arr[l:r+1])
+#     print(f"\n---> [功能演示] 区间第 K 小:")
+#     print(f"查询原数组区间 [{l}, {r}]（即 {arr[l:r+1]}）的第 {k} 小值")
+#     print(f"期望按升序排列为: {expected_arr} -> 答案应该是 {expected_arr[k-1]}")
+#     print(f"主席树查询结果: {res}")
+    
+#     # 【扩展功能】查询区间内某元素的排名
+#     val_to_rank = 3
+#     rank = pst.query_rank(l, r+1, val_to_rank)
+#     print(f"\n---> [功能演示] 区间内元素排名:")
+#     print(f"元素 {val_to_rank} 在区间 [{l}, {r}] 中的排名是: {rank}")
+    
+#     # 【加分项：功能3-2】区间不同元素个数查询
+#     pst_distinct = PersistentTreeDistinct(arr)
+#     dl, dr = 1, 5  # 查询区间 arr[1:6] => [1, 3, 2, 5, 2]
+#     distinct_count = pst_distinct.query_distinct(dl, dr)
+#     print(f"\n---> [功能演示] 区间不同元素个数查询 (加分项):")
+#     print(f"数组切片 arr[{dl}:{dr}] 的真实值为: {arr[dl:dr+1]}")
+#     print(f"该区间内不同的元素集合为: {set(arr[dl:dr+1])} (期待个数: {len(set(arr[dl:dr+1]))})")
+#     print(f"加分主席树计算的不同元素个数为: {distinct_count}")
 
-    # 可视化树结构演示
-    print(f"\n---> [功能演示] 可视化树结构:")
-    pst.print_visual_tree(1)  # 插入第一个元素 4 后的树
-    pst.print_visual_tree(2)  # 插入前两个元素 4, 1 后的树
-    pst.print_visual_tree(3)  # 插入前三个元素 4, 1, 3 后的树
-    pst.print_visual_tree(4)  # 插入前四个元素 4, 1, 3, 2 后的树
+#     # 【功能4】打印版本树结构展示持久化机制
+#     print(f"\n---> [功能演示] 观察持久化的版本复用:")
+#     pst.print_version_tree(0)  # 空树
+#     pst.print_version_tree(1)  # 插入第一个元素 4 后的树
 
-    # 加分项：可视化打印不同元素的线段树版本
-    print(f"\n---> [功能演示] 可视化不同元素线段树版本:")
-    pst_distinct.print_visual_tree(0)  # 空树
-    pst_distinct.print_visual_tree(1)  # 插入第一个元素 4 后的树
-    pst_distinct.print_visual_tree(2)  # 插入前两个元素 4, 1 后的树
-    pst_distinct.print_visual_tree(3)  # 插入前三个元素 4, 1, 3 后的树
-    pst_distinct.print_visual_tree(4)  # 插入前四个元素 4, 1, 3, 2 后的树
+#     # 可视化树结构演示
+#     print(f"\n---> [功能演示] 可视化树结构:")
+#     pst.print_visual_tree(1)  # 插入第一个元素 4 后的树
+#     pst.print_visual_tree(2)  # 插入前两个元素 4, 1 后的树
+#     pst.print_visual_tree(3)  # 插入前三个元素 4, 1, 3 后的树
+#     pst.print_visual_tree(4)  # 插入前四个元素 4, 1, 3, 2 后的树
+
+#     # 加分项：可视化打印不同元素线段树版本
+#     print(f"\n---> [功能演示] 可视化不同元素线段树版本:")
+#     pst_distinct.print_visual_tree(0)  # 空树
+#     pst_distinct.print_visual_tree(1)  # 插入第一个元素 4 后的树
+#     pst_distinct.print_visual_tree(2)  # 插入前两个元素 4, 1 后的树
+#     pst_distinct.print_visual_tree(3)  # 插入前三个元素 4, 1, 3 后的树
+#     pst_distinct.print_visual_tree(4)  # 插入前四个元素 4, 1, 3, 2 后的树
 
 
 # 实际上，离散化后的权值线段树通常不需要初始的 $4n$ 建树（除非有初始权值）。每次插入产生 $\lceil \log_2 N \rceil$ 个新节点。经验值通常开启 32倍或40倍 的 $N$
